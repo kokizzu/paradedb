@@ -15,20 +15,15 @@ open-source relational database system. With more than three decades of active d
 it has proven architecture and a strong reputation for reliability, data integrity,
 and correctness. ParadeDB's core is built on PostgreSQL.
 
-## PostgreSQL Extensions
+## pgvector
 
-[PostgreSQL extensions](https://pgxn.org/) are a rich ecosystem of add-ons that extend
-the functionality of the core PostgreSQL database system. They enable a range of
-advanced capabilities, from performance monitoring to geospatial indexing. ParadeDB
-develops its own PostgreSQL extensions and integrates various open-source extensions
-in our product. Special mention goes to [pgvector](https://github.com/pgvector/pgvector),
-which we use to power part of our search capabilities, and [pgml](https://github.com/postgresml/postgresml/tree/master/pgml-extension),
-which we use for generating embeddings. For a detailed list of the extensions we
-use in ParadeDB, please refer to our Dockerfile(s).
+[pgvector](https://github.com/pgvector/pgvector) is an open-source Postgres extension that enables
+similarity search for Postgres. ParadeDB uses `pgvector` to power the vector search part of our
+search capabilities.
 
-## PGRX
+## pgrx
 
-[PGRX](https://github.com/pgcentralfoundation/pgrx) is a powerful toolset for
+[pgrx](https://github.com/pgcentralfoundation/pgrx) is a powerful toolset for
 PostgreSQL extension development in Rust. It simplifies the process of creating,
 testing, and packaging extensions, enabling developers to harness the performance
 and safety guarantees of Rust within the PostgreSQL ecosystem. ParadeDB uses PGRX
@@ -40,6 +35,10 @@ the first PGRX extension and primary example, for the architecture of our own ex
 [Tantivy](https://github.com/quickwit-oss/tantivy) is a full-text search library
 inspired by Apache Lucene, written entirely in Rust. ParadeDB uses Tantivy to power
 part of our search functionalities.
+
+## DuckDB
+
+[DuckDB](https://github.com/duckdb/duckdb) is a high-performance analytical database system. It is designed to be fast, reliable, portable, and easy to use. ParadeDB uses DuckDB do vectorized query processing for columnar data.
 
 ## Docker
 
@@ -54,15 +53,10 @@ ParadeDB uses Docker to develop, package, and deploy our software.
 for automating deployment, scaling, and management of containerized applications.
 ParadeDB uses Kubernetes to deploy our software.
 
-## Patroni
+## CloudNativePG
 
-[Patroni](https://github.com/zalando/patroni) is a template for high availability
-(HA) PostgreSQL solutions. ParadeDB uses Patroni to enable high availability within
-our PostgreSQL clusters.
-
-## PGO
-
-[PGO](https://github.com/CrunchyData/postgres-operator) is a PostgreSQL Operator
-for production-grade PostgreSQL clusters on Kubernetes. It enables features like
-high availability, disaster recovery, and monitoring. ParadeDB uses PGO to manage
-our PostgreSQL clusters.
+[CloudNativePG](https://github.com/cloudnative-pg/cloudnative-pg) is a PostgreSQL
+operator for production-grade PostgreSQL clusters on Kubernetes. It covers the full
+lifecycle of a highly available PostgreSQL database cluster with a primary/standby
+architecture, using native streaming replication. ParadeDB uses CloudNativePG to
+manage our PostgreSQL clusters.

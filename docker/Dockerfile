@@ -1,294 +1,239 @@
-ARG PG_VERSION_MAJOR
+# The default Postgres major version ParadeDB ships with. In CI, this gets updated to ship builds for all official PGDG versions.
+ARG PG_VERSION_MAJOR=17
 
 ###############################################
-# First Stage: Base
+# First Stage: Builder
 ###############################################
 
-FROM postgres:${PG_VERSION_MAJOR}-bullseye as base
+# Note: Debian Bookworm = Debian 12
+FROM postgres:${PG_VERSION_MAJOR}-bookworm AS builder
 
-# Declare all the build arguments and set them to
-# environment variables for use in build and runtime
 ARG PG_VERSION_MAJOR
-ARG PG_BM25_VERSION
-ARG PG_SEARCH_VERSION
-ARG PGNODEMX_VERSION
-ARG PG_CRON_VERSION
-ARG PG_NET_VERSION
-ARG PG_IVM_VERSION
-ARG PG_GRAPHQL_VERSION
-ARG PG_HASHIDS_VERSION
-ARG PG_JSONSCHEMA_VERSION
-ARG PG_REPACK_VERSION
-ARG PG_STAT_MONITOR_VERSION
-ARG PG_HINT_PLAN_VERSION
-ARG PG_ROARINGBITMAP_VERSION
-ARG PGFACETING_VERSION
-ARG PGML_VERSION
-ARG PGTAP_VERSION
-ARG PGVECTOR_VERSION
-ARG PGAUDIT_VERSION
-ARG POSTGIS_VERSION
-ARG PGROUTING_VERSION
-ARG PGSQL_HTTP_VERSION
-ARG HYPOPG_VERSION
-ARG RUM_VERSION
-ARG AGE_VERSION
+ARG RUST_VERSION=stable
 
+# Declare buildtime environment variables
 ENV PG_VERSION_MAJOR=${PG_VERSION_MAJOR} \
-    PG_BM25_VERSION=${PG_BM25_VERSION} \
-    PG_SEARCH_VERSION=${PG_SEARCH_VERSION} \
-    PGNODEMX_VERSION=${PGNODEMX_VERSION} \
-    PG_CRON_VERSION=${PG_CRON_VERSION} \
-    PG_NET_VERSION=${PG_NET_VERSION} \
-    PG_IVM_VERSION=${PG_IVM_VERSION} \
-    PG_GRAPHQL_VERSION=${PG_GRAPHQL_VERSION} \
-    PG_HASHIDS_VERSION=${PG_HASHIDS_VERSION} \
-    PG_JSONSCHEMA_VERSION=${PG_JSONSCHEMA_VERSION} \
-    PG_REPACK_VERSION=${PG_REPACK_VERSION} \
-    PG_STAT_MONITOR_VERSION=${PG_STAT_MONITOR_VERSION} \
-    PG_HINT_PLAN_VERSION=${PG_HINT_PLAN_VERSION} \
-    PG_ROARINGBITMAP_VERSION=${PG_ROARINGBITMAP_VERSION} \
-    PGFACETING_VERSION=${PGFACETING_VERSION} \
-    PGML_VERSION=${PGML_VERSION} \
-    PGTAP_VERSION=${PGTAP_VERSION} \
-    PGVECTOR_VERSION=${PGVECTOR_VERSION} \
-    PGAUDIT_VERSION=${PGAUDIT_VERSION} \
-    POSTGIS_VERSION=${POSTGIS_VERSION} \
-    PGROUTING_VERSION=${PGROUTING_VERSION} \
-    PGSQL_HTTP_VERSION=${PGSQL_HTTP_VERSION} \
-    HYPOPG_VERSION=${HYPOPG_VERSION} \
-    RUM_VERSION=${RUM_VERSION} \
-    AGE_VERSION=${AGE_VERSION} \
-    DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC
+    RUST_VERSION=${RUST_VERSION}
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+SHELL ["/bin/bash", "-o", "pipefail", "-c", "-e"]
 
-# Install common dependencies to builder and runtime
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    wget \
-    sudo \
-    gnupg \
-    gcc \
     software-properties-common \
     ca-certificates \
-    python3.10 \
-    libssl-dev \
-    python3-dev \
-    python3-pip \
-    libopenblas-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install apt-fast
-RUN /bin/bash -c "$(curl -sL https://git.io/vokNn)"
-
-# Add PostgreSQL's third party repository to get the latest versions
-RUN curl -s https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | tee /etc/apt/sources.list.d/pgdg.list
-
-RUN apt-get update && apt-fast install -y --no-install-recommends \
-    postgresql-server-dev-${PG_VERSION_MAJOR} \
-    && rm -rf /var/lib/apt/lists/*
-
-###############################################
-# Second Stage: Builder
-###############################################
-
-FROM base as builder
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Install Rust and other build dependencies
-RUN apt-get update && apt-fast install -y --no-install-recommends \
     build-essential \
-    checkinstall \
-    clang \
+    gnupg \
+    curl \
     git \
-    cmake \
+    make \
+    gcc \
+    clang \
     pkg-config \
-    liblz4-dev \
-    libcurl4-openssl-dev \
-    # pgml & AGE
-    bison \
-    flex \
-    # pgml & pg_repack
-    libreadline-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    libopenblas-dev \
+    postgresql-server-dev-all \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain "${RUST_VERSION}" -y
 
 ENV PATH="/root/.cargo/bin:$PATH" \
     PGX_HOME=/usr/lib/postgresql/${PG_VERSION_MAJOR}
 
-RUN cargo install cargo-pgrx --version 0.9.8 && \
-    cargo pgrx init "--pg${PG_VERSION_MAJOR}=/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config"
+# Copy project because we need to extract the pgrx version
+COPY . /tmp/
 
-######################
-# pg_bm25
-######################
-
-FROM builder as builder-pg_bm25
-
-WORKDIR /tmp/pg_bm25
-
-COPY pg_bm25/ /tmp/pg_bm25
-
-# Use the build argument to update the version in Cargo.toml
-RUN sed -i "s/version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"${PG_BM25_VERSION}\"/" Cargo.toml && \
-    cargo pgrx package --pg-config "/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config"
-
-####################
-# pgml
-####################
-
-FROM builder as builder-pgml
-
-RUN apt-get update && apt-fast install -y --no-install-recommends \
-    libz-dev \
-    tzdata \
-    libpq-dev \
-    libclang-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git clone --branch "v${PGML_VERSION}" "https://github.com/paradedb/postgresml" /tmp/postgresml
-
-WORKDIR /tmp/postgresml/pgml-extension
-
-RUN git submodule update --init --recursive && \
-    git fetch --tags && \
-    git fetch --depth 1 origin tag "v${PGML_VERSION}" && \
-    git checkout "v${PGML_VERSION}"
-
-# Update pgml schema to paradedb
-RUN sed -i "s/\(schema = \).*/\1'paradedb'/" pgml.control && \
-    find . -type f -exec sed -i 's/pgml\./paradedb\./g' {} + && \
-    cargo pgrx package --pg-config "/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config"
+# Install the pgrx version of pg_search and pg_analytics
+WORKDIR /tmp/
+RUN PGRX_VERSION=$(cargo tree --depth 1 -i pgrx -p pg_search | head -n 1 | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/') && \
+    echo "PGRX_VERSION=$PGRX_VERSION" && \
+    cargo install --locked cargo-pgrx --version "${PGRX_VERSION}" && \
+    cargo pgrx init "--pg${PG_VERSION_MAJOR}=/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config" && \
+    rm -rf /tmp/Cargo.toml
 
 ######################
 # pg_search
 ######################
 
-FROM builder as builder-pg_search
+FROM builder AS builder-pg_search
 
+ARG POSTHOG_API_KEY
+ARG POSTHOG_HOST
+ARG COMMIT_SHA
+ARG PARADEDB_VERSION
+ARG PARADEDB_TELEMETRY
+
+# Declare compile-time environment variables
+ENV POSTHOG_API_KEY=${POSTHOG_API_KEY} \
+    POSTHOG_HOST=${POSTHOG_HOST} \
+    COMMIT_SHA=${COMMIT_SHA} \
+    PARADEDB_VERSION=${PARADEDB_VERSION} \
+    PARADEDB_TELEMETRY=${PARADEDB_TELEMETRY}
+
+COPY . /tmp/
+
+# Build the extension
 WORKDIR /tmp/pg_search
-
-COPY pg_search/ /tmp/pg_search
-
-# Use the build argument to update the version in Cargo.toml
-RUN sed -i "s/version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"${PG_SEARCH_VERSION}\"/" Cargo.toml && \
-    cargo pgrx package --pg-config "/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config"
+RUN cargo pgrx package --features icu --pg-config "/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config"
 
 ######################
-# Other extensions
+# pg_analytics
 ######################
 
-FROM builder as builder-others
+FROM builder AS builder-pg_analytics
 
-ARG TARGETARCH
+ARG POSTHOG_API_KEY
+ARG POSTHOG_HOST
+ARG COMMIT_SHA
+ARG PARADEDB_VERSION
+ARG PARADEDB_TELEMETRY
 
-ENV USE_PGXS=1
+# Declare compile-time environment variables
+ENV POSTHOG_API_KEY=${POSTHOG_API_KEY} \
+    POSTHOG_HOST=${POSTHOG_HOST} \
+    COMMIT_SHA=${COMMIT_SHA} \
+    PARADEDB_VERSION=${PARADEDB_VERSION} \
+    PARADEDB_TELEMETRY=${PARADEDB_TELEMETRY}
 
-RUN apt-get update && apt-fast install -y --no-install-recommends \
-    # rum requirements
-    systemtap-sdt-dev \
-    # pgaudit requirements
-    libkrb5-dev \
-    # postgis requirements
-    libgeos-dev \
-    libproj-dev \
-    libprotobuf-c-dev \
-    libsfcgal-dev \
-    libxml2-dev \
-    libjson-c-dev \
-    libgdal-dev \
-    gdal-bin \    
-    gettext \
-    libtool \
-    xsltproc \
-    protobuf-c-compiler \
-    # AGE
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN git clone --branch v0.3.2 https://github.com/paradedb/pg_analytics.git /tmp/pg_analytics/
 
-COPY scripts/install_pg_extensions.sh /usr/local/bin/
+# Build the extension
+WORKDIR /tmp/pg_analytics
+RUN cargo pgrx package --pg-config "/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config"
 
-# Compile and install extensions from source
-RUN /usr/local/bin/install_pg_extensions.sh \
-    "pgvector,${PGVECTOR_VERSION},https://github.com/pgvector/pgvector/archive/refs/tags/v${PGVECTOR_VERSION}.tar.gz" \
-    "pgaudit,${PGAUDIT_VERSION},https://github.com/pgaudit/pgaudit/archive/refs/tags/${PGAUDIT_VERSION}.tar.gz" \
-    "pgnodemx,${PGNODEMX_VERSION},https://github.com/crunchydata/pgnodemx/archive/refs/tags/${PGNODEMX_VERSION}.tar.gz" \
-    "pg_cron,${PG_CRON_VERSION},https://github.com/citusdata/pg_cron/archive/refs/tags/v${PG_CRON_VERSION}.tar.gz" \
-    "pg_ivm,${PG_IVM_VERSION},https://github.com/sraoss/pg_ivm/archive/refs/tags/v${PG_IVM_VERSION}.tar.gz" \
-    "pg_hashids,${PG_HASHIDS_VERSION},https://github.com/iCyberon/pg_hashids/archive/refs/tags/v${PG_HASHIDS_VERSION}.tar.gz" \
-    "pg_repack,${PG_REPACK_VERSION},https://github.com/reorg/pg_repack/archive/refs/tags/${PG_REPACK_VERSION}.tar.gz" \
-    "pg_stat_monitor,${PG_STAT_MONITOR_VERSION},https://github.com/percona/pg_stat_monitor/archive/refs/tags/${PG_STAT_MONITOR_VERSION}.tar.gz" \
-    "pg_hint_plan,${PG_HINT_PLAN_VERSION},https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/${PG_HINT_PLAN_VERSION}.tar.gz" \
-    "pg_roaringbitmap,${PG_ROARINGBITMAP_VERSION},https://github.com/ChenHuajun/pg_roaringbitmap/archive/refs/tags/v${PG_ROARINGBITMAP_VERSION}.tar.gz" \
-    "pgfaceting,${PGFACETING_VERSION},https://github.com/cybertec-postgresql/pgfaceting/archive/refs/tags/v${PGFACETING_VERSION}.tar.gz" \
-    "pgtap,${PGTAP_VERSION},https://github.com/theory/pgtap/archive/refs/tags/v${PGTAP_VERSION}.tar.gz" \
-    "postgis,${POSTGIS_VERSION},https://github.com/postgis/postgis/archive/refs/tags/${POSTGIS_VERSION}.tar.gz" \
-    "pgrouting,${PGROUTING_VERSION},https://github.com/pgRouting/pgrouting/archive/refs/tags/v${PGROUTING_VERSION}.tar.gz" \
-    "pgsql-http,${PGSQL_HTTP_VERSION},https://github.com/pramsey/pgsql-http/archive/refs/tags/v${PGSQL_HTTP_VERSION}.tar.gz" \
-    "hypopg,${HYPOPG_VERSION},https://github.com/HypoPG/hypopg/archive/refs/tags/${HYPOPG_VERSION}.tar.gz" \
-    "rum,${RUM_VERSION},https://github.com/postgrespro/rum/archive/refs/tags/${RUM_VERSION}.tar.gz" \
-    "age,${AGE_VERSION},https://github.com/apache/age/archive/refs/tags/PG${PG_VERSION_MAJOR}/v${AGE_VERSION}.tar.gz"
+######################
+# pgvector
+######################
 
-# Install pre-compiled extensions
-RUN curl -L "https://github.com/supabase/pg_net/releases/download/v${PG_NET_VERSION}/pg_net-v${PG_NET_VERSION}-pg${PG_VERSION_MAJOR}-$TARGETARCH-linux-gnu.deb" -o /tmp/pg_net.deb && \
-    curl -L "https://github.com/supabase/pg_graphql/releases/download/v${PG_GRAPHQL_VERSION}/pg_graphql-v${PG_GRAPHQL_VERSION}-pg${PG_VERSION_MAJOR}-$TARGETARCH-linux-gnu.deb" -o /tmp/pg_graphql.deb && \
-    curl -L "https://github.com/supabase/pg_jsonschema/releases/download/v${PG_JSONSCHEMA_VERSION}/pg_jsonschema-v${PG_JSONSCHEMA_VERSION}-pg${PG_VERSION_MAJOR}-$TARGETARCH-linux-gnu.deb" -o /tmp/pg_jsonschema.deb
+FROM builder AS builder-pgvector
+
+ARG PG_VERSION_MAJOR
+ENV PG_CONFIG=/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config
+
+# Build the extension
+WORKDIR /tmp
+RUN git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
+WORKDIR /tmp/pgvector
+RUN export PG_CFLAGS="-Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare" && \
+    echo "trusted = true" >> vector.control && \
+    make clean -j && \
+    make USE_PGXS=1 OPTFLAGS="" -j
+
+######################
+# pg_cron
+######################
+
+FROM builder AS builder-pg_cron
+
+ARG PG_VERSION_MAJOR
+ENV PG_CONFIG=/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config
+
+# Build the extension
+WORKDIR /tmp
+RUN git clone --branch v1.6.4 https://github.com/citusdata/pg_cron.git
+WORKDIR /tmp/pg_cron
+RUN echo "trusted = true" >> pg_cron.control && \
+    make clean -j && \
+    make USE_PGXS=1 -j
+
+######################
+# pg_ivm
+######################
+
+FROM builder AS builder-pg_ivm
+
+ARG PG_VERSION_MAJOR
+ENV PG_CONFIG=/usr/lib/postgresql/${PG_VERSION_MAJOR}/bin/pg_config
+
+# Build the extension
+WORKDIR /tmp
+RUN git clone --branch v1.9 https://github.com/sraoss/pg_ivm.git
+WORKDIR /tmp/pg_ivm
+RUN echo "trusted = true" >> pg_ivm.control && \
+    make clean -j && \
+    make USE_PGXS=1 -j
 
 ###############################################
-# Third Stage: PostgreSQL
+# Second Stage: PostgreSQL and Barman Cloud
 ###############################################
 
-FROM base as paradedb
+FROM postgres:${PG_VERSION_MAJOR}-bookworm AS paradedb
 
-ARG TARGETARCH
+LABEL maintainer="ParadeDB - https://paradedb.com" \
+    org.opencontainers.image.description="ParadeDB - Postgres for Search and Analytics" \
+    org.opencontainers.image.source="https://github.com/paradedb/paradedb"
 
-WORKDIR /usr/src/app
+ARG PG_VERSION_MAJOR
 
-COPY --from=builder-pgml /tmp/postgresml/pgml-extension/requirements.txt /usr/src/app/
+# Declare runtime environment variables
+ENV PG_VERSION_MAJOR=${PG_VERSION_MAJOR}
 
-# Install postgis, pgml, patroni & Crunchy operator runtime dependencies
-RUN apt-get update && apt-fast install -y --no-install-recommends \
-    # postgis
-    libgeos-c1v5 \
-    libproj-dev \
-    libprotobuf-c1 \
-    # Crunchy operator
-    libnss-wrapper \
-    pgbackrest \
-    && rm -rf /var/lib/apt/lists/* /tmp/* && \
-    # pgml
-    pip3 install --no-cache-dir -r requirements.txt && rm -rf requirements.txt && \
-    # patroni
-    pip3 install --no-cache-dir patroni[etcd3] psycopg[binary]>=3.0.0 && \
-    # Crunchy operator
-    # Only need to copy on x84_64, since the lib is already in the right place on arm64
-    if [ "$TARGETARCH" = "amd64" ]; then \
-        mkdir -p /usr/lib64 && \
-        cp /usr/lib/x86_64-linux-gnu/libnss_wrapper.so /usr/lib64/; \
-    fi
+SHELL ["/bin/bash", "-o", "pipefail", "-c", "-e"]
 
-# Copy & install the non-pgrx extensions from their builder stage
-COPY --from=builder-others /tmp/*.deb /tmp/
-RUN apt-get update && apt-fast install -y --no-install-recommends \
-    /tmp/*.deb \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+# Copy third-party extensions from their builder stages
+COPY --from=builder-pgvector /tmp/pgvector/*.so /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
+COPY --from=builder-pgvector /tmp/pgvector/*.control /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
+COPY --from=builder-pgvector /tmp/pgvector/sql/*.sql /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
+COPY --from=builder-pg_cron /tmp/pg_cron/*.so /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
+COPY --from=builder-pg_cron /tmp/pg_cron/*.control /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
+COPY --from=builder-pg_cron /tmp/pg_cron/*.sql /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
+COPY --from=builder-pg_ivm /tmp/pg_ivm/*.so /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
+COPY --from=builder-pg_ivm /tmp/pg_ivm/*.control /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
+COPY --from=builder-pg_ivm /tmp/pg_ivm/*.sql /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
 
-# Copy the pg_bm25, pgml & pg_search extensions from their builder stages
-# We order them by how unlikely they are to be modified, to reduce layer rebuilds
-COPY --from=builder-pgml /tmp/postgresml/pgml-extension/target/release/pgml-pg${PG_VERSION_MAJOR}/usr/share/postgresql/${PG_VERSION_MAJOR}/extension/* /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
-COPY --from=builder-pgml /tmp/postgresml/pgml-extension/target/release/pgml-pg${PG_VERSION_MAJOR}/usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/* /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
-COPY --from=builder-pg_search /tmp/pg_search/target/release/pg_search-pg${PG_VERSION_MAJOR}/usr/share/postgresql/${PG_VERSION_MAJOR}/extension/* /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
-COPY --from=builder-pg_search /tmp/pg_search/target/release/pg_search-pg${PG_VERSION_MAJOR}/usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/* /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
-COPY --from=builder-pg_bm25 /tmp/pg_bm25/target/release/pg_bm25-pg${PG_VERSION_MAJOR}/usr/share/postgresql/${PG_VERSION_MAJOR}/extension/* /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
-COPY --from=builder-pg_bm25 /tmp/pg_bm25/target/release/pg_bm25-pg${PG_VERSION_MAJOR}/usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/* /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
+# Copy the ParadeDB extensions from their builder stages
+COPY --from=builder-pg_search /tmp/target/release/pg_search-pg${PG_VERSION_MAJOR}/usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/* /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
+COPY --from=builder-pg_search /tmp/target/release/pg_search-pg${PG_VERSION_MAJOR}/usr/share/postgresql/${PG_VERSION_MAJOR}/extension/* /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
+COPY --from=builder-pg_analytics /tmp/pg_analytics/target/release/pg_analytics-pg${PG_VERSION_MAJOR}/usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/* /usr/lib/postgresql/${PG_VERSION_MAJOR}/lib/
+COPY --from=builder-pg_analytics /tmp/pg_analytics/target/release/pg_analytics-pg${PG_VERSION_MAJOR}/usr/share/postgresql/${PG_VERSION_MAJOR}/extension/* /usr/share/postgresql/${PG_VERSION_MAJOR}/extension/
 
-# Copy entrypoint script, which will be handled by the official image
-# initialization scipt
-COPY ./scripts/entrypoint.sh /docker-entrypoint-initdb.d/10_paradedb.sh
+# Install Barman Cloud and its dependencies for Azure, Google, and AWS via `pip`, and clean up after the installation to
+# minimize the size of the image. These are required for enabling Postgres backups in our CloudNativePG deployments.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libpq5 python3-pip python3-dev python3-psycopg2 && \
+    rm /usr/lib/python*/EXTERNALLY-MANAGED && \
+    pip3 install --no-cache-dir 'barman[cloud,azure,snappy,google]<3.12' && \
+    apt-get remove -y python3-dev python3-pip --purge && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* && \
+    find /usr/lib | grep -E "(/__pycache__$|\.pyc$|\.pyo$)" | xargs rm -rf && \
+    find /usr/local | grep -E "(/__pycache__$|\.pyc$|\.pyo$)" | xargs rm -rf && \
+    find /var/cache -type f -exec truncate --size 0 {} \; && \
+    find /var/log -type f -exec truncate --size 0 {} \;
 
-# Postgres user for Crunchy operator
-USER 999
+# Install Postgis and ca-certificates
+# ca-certificates required for TLS connection to PostHog (which is used for telemetry) and PostGIS
+ENV POSTGIS_VERSION_MAJOR=3
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    postgresql-$PG_VERSION_MAJOR-postgis-$POSTGIS_VERSION_MAJOR \
+    postgresql-$PG_VERSION_MAJOR-postgis-$POSTGIS_VERSION_MAJOR-scripts \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* && \
+    update-ca-certificates
+
+# The postgresql.conf.sample file is used as a template for the postgresql.conf file, which
+# does not exist until the first time the container is started. By adding our settings to the
+# postgresql.conf.sample file, we ensure that our settings are applied onto the postgresql.conf file.
+#
+# The `postgres` database is the default database that exists in every Postgres installation. The pg_cron
+# extension requires a database to store its metadata tables. By using `postgres`, we ensure that it has a
+# stable, always-available database for its operations, no matter what other databases are created or deleted.
+RUN sed -i "s/^#shared_preload_libraries = ''/shared_preload_libraries = 'pg_search,pg_analytics,pg_cron'/" /usr/share/postgresql/postgresql.conf.sample && \
+    echo "cron.database_name = 'postgres'" >> /usr/share/postgresql/postgresql.conf.sample
+
+# In order for a user to manually install third party Postgres extensions (e.g. PostGIS, pg_partman, etc.) that ParadeDB does not
+# ship with by default, it is necessary to fetch the PostgreSQL APT repository key and add the repository to the list of sources.
+# To minimize the burden on the user, we pre-fetch the key and the repository, but do not run `apt-get update` to avoid unnecessarily
+# downloading the packages. The user can run `apt-get update` themselves to fetch the package lists and install the desired third party
+# extension(s) if/when the time comes. This keeps the image as small as possible for each user's specific use case.
+#
+# We also uninstall `wget` after adding the PostgreSQL APT repository to the list of sources to minimize the surface area for potential security risks.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget && \
+    echo "deb http://apt.postgresql.org/pub/repos/apt/ bookworm-pgdg main" | tee /etc/apt/sources.list.d/pgdg.list && \
+    wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - && \
+    apt-get purge -y wget && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy ParadeDB bootstrap script to install extensions and configure postgresql.conf
+COPY ./docker/bootstrap.sh /docker-entrypoint-initdb.d/10_bootstrap_paradedb.sh

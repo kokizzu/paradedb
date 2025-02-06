@@ -1,24 +1,26 @@
 # workflows/lint-pr-title.yml
 #
-# PR Title: Linting
+# Lint PR Title
 # Lint and enforce proper PR title format.
 
-name: Linting
+name: Lint PR Title
 
 on:
   pull_request:
-    types:
-      - opened
-      - edited
-      - synchronize
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   pull-requests: read
 
+concurrency:
+  group: lint-pr-title-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-pr-title:
     name: Validate PR Title
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
+    if: github.event.pull_request.draft == false
 
     steps:
       - name: Checkout Git Repository

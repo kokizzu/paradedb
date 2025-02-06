@@ -1,35 +1,38 @@
 # workflows/lint-yaml.yml
 #
-# YAML: Linting
+# Lint YAML
 # Lint YAML files using Prettier.
 
-name: Linting
+name: Lint YAML
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "**/*.yml"
       - "**/*.yaml"
+      - ".github/workflows/lint-yaml.yml"
   workflow_dispatch:
 
 concurrency:
-  group: lint-yaml-${{ github.head_ref || github.run_id }}
+  group: lint-yaml-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint-yaml:
     name: Lint YAML Files
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
+    if: github.event.pull_request.draft == false
 
     steps:
       - name: Checkout Git Repository
         uses: actions/checkout@v4
 
       - name: Set up NodeJS Environment
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
 
       - name: Install Prettier
         run: npm install -g prettier
 
       - name: Check YAML Formatting
-        run: prettier --check "**/*.{yml,yaml}"
+        run: prettier --check "**/*.{yml,yaml}" --ignore-path .prettierignore

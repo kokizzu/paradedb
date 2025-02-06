@@ -1,12 +1,13 @@
 # workflows/lint-markdown.yml
 #
-# Markdown: Linting
+# Lint Markdown
 # Lint Markdown files using Prettier.
 
-name: Linting
+name: Lint Markdown
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "**/*.md"
       - "**/*.mdx"
@@ -14,20 +15,21 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: lint-markdown-${{ github.head_ref || github.run_id }}
+  group: lint-markdown-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint-markdown:
     name: Lint Markdown Files
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
+    if: github.event.pull_request.draft == false
 
     steps:
       - name: Checkout Git Repository
         uses: actions/checkout@v4
 
       - name: Set up NodeJS Environment
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
 
       - name: Install Prettier
         run: npm install -g prettier markdownlint-cli
@@ -35,5 +37,5 @@ jobs:
       - name: Run Markdown Lint
         run: markdownlint '**/*.md'
 
-      - name: Run Pettier
-        run: prettier --check '{**/**.md,**/**.mdx}'
+      - name: Run Prettier
+        run: prettier --check '{**/*.md,**/*.mdx}'

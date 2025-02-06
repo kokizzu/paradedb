@@ -6,19 +6,23 @@
 
 # Cargo
 target/
-debug/
-results/
 
 # Rustfmt
-**/*.rs.bk
+*.rs.bk
 
 # Code Coverage
 *.profraw
 
-# pg_regress
-results/
-regression.diffs
-regression.out
+# Logs
+*.txt
+*.log
 
-# pgvector
-pgvector/
+# Benchmarks
+*.tsv
+*.tsv.gz
+*.csv
+*.csv.gz
+
+# Tests
+regression.*
+results/

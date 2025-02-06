@@ -1,37 +1,24 @@
 #
-# This docker-compose.yml file is for production deployments of the Parade DBMS. It pulls the latest
-# ParadeDB image from Docker Hub, which has all extensions pre-installed, and runs it with all other
-# ParadeDB services, to allow for production use of the ParadeDB system. It is intended for hobby
-# production use. Make sure to change the POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB!
+# This docker-compose.yml file is for hobby production deployments of ParadeDB. It pulls the latest
+# ParadeDB image from Docker Hub, which has packages all ParadeDB extensions. It is intended for hobby
+# production use. For professional production usage, we recommend using our Helm chart.
 #
-
-version: "3.8"
+# Make sure to update POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB before use.
+#
 
 services:
   paradedb:
     image: paradedb/paradedb:latest
+    container_name: paradedb
     environment:
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: mydatabase
+      PARADEDB_TELEMETRY: true # Set to 'false' (or remove) to disable anonymous telemetry
     ports:
       - "5432:5432"
-      - "9700:9700"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready", "-U", "myuser", "-d", "mydatabase"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    volumes:
+      - paradedb_data:/var/lib/postgresql/data/
 
-  postgrest:
-    image: postgrest/postgrest:v11.2.0
-    depends_on:
-      paradedb:
-        condition: service_healthy
-    environment:
-      PGRST_DB_URI: postgres://myuser:mypassword@paradedb:5432/mydatabase
-      PGRST_DB_SCHEMA: public
-      PGRST_DB_ANON_ROLE: anonymous
-      PGRST_JWT_SECRET: paradedb-api-key
-    ports:
-      - "3000:3000"
+volumes:
+  paradedb_data:

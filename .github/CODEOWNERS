@@ -1,9 +1,11 @@
-# Order is important. The last matching pattern has the most precedence.
+# Order is important. The last matching pattern has the most precedence
 
-/.github/                                                      @philippemnoel
-/benchmarks/                                                   @philippemnoel @sardination
-/docker/                                                       @philippemnoel
-/docs/                                                         @rebasedming
-/pg_bm25/                                                      @rebasedming @mauaraujo
-/pg_search/                                                    @rebasedming @mauaraujo
-/scripts/                                                      @philippemnoel
+/.cargo/                                                       @philippemnoel @rebasedming
+/.github/                                                      @philippemnoel @rebasedming
+/benchmarks/                                                   @philippemnoel @rebasedming
+/cargo-paradedb/                                               @rebasedming @neilyio
+/docker/                                                       @philippemnoel @rebasedming
+/docs/                                                         @rebasedming @neilyio
+/pg_search/                                                    @rebasedming @neilyio
+/tests/                                                        @rebasedming @neilyio
+/tokenizers/                                                   @rebasedming @neilyio

@@ -1,16 +1,20 @@
 <h1 align="center">
-  <img src="../docs/logo/pg_search.svg" alt="pg_search" width="600px"></a>
+  <img src="../docs/logo/pg_search.svg" alt="pg_search"></a>
 <br>
 </h1>
 
-[![Testing](https://github.com/paradedb/paradedb/actions/workflows/test-pg_search.yml/badge.svg)](https://github.com/paradedb/paradedb/actions/workflows/test-pg_search.yml)
+[![Test pg_search](https://github.com/paradedb/paradedb/actions/workflows/test-pg_search.yml/badge.svg)](https://github.com/paradedb/paradedb/actions/workflows/test-pg_search.yml)
+[![Benchmark pg_search](https://github.com/paradedb/paradedb/actions/workflows/benchmark-pg_search.yml/badge.svg)](https://github.com/paradedb/paradedb/actions/workflows/benchmark-pg_search.yml)
 
 ## Overview
 
-`pg_search` is a PostgreSQL extension that enables hybrid search in Postgres. Hybrid search is a search technique
-that combines BM25-based full text search with vector-based similarity search. It is built on top of `pg_bm25`, the leading full text search extension for Postgres, and `pgvector`, the leading vector similarity search extension for Postgres, using `pgrx`.
+`pg_search` is a Postgres extension that enables full text search over heap tables using the BM25 algorithm. It is built on top of Tantivy, the Rust-based alternative to Apache Lucene, using `pgrx`. Please refer to the [ParadeDB documentation](https://docs.paradedb.com/documentation/getting-started/quickstart) to get started.
 
-`pg_search` is supported on PostgreSQL 11+.
+`pg_search` is supported on all versions supported by the PostgreSQL Global Development Group, which includes PostgreSQL 13+.
+
+Check out the `pg_search` benchmarks [here](../benchmarks/README.md).
+
+`pg_search` uses Tantivy version 0.23.
 
 ## Installation
 
@@ -20,142 +24,201 @@ The easiest way to use the extension is to run the ParadeDB Dockerfile:
 
 ```bash
 docker run \
+  --name paradedb \
   -e POSTGRES_USER=<user> \
   -e POSTGRES_PASSWORD=<password> \
   -e POSTGRES_DB=<dbname> \
+  -v paradedb_data:/var/lib/postgresql/data/ \
   -p 5432:5432 \
   -d \
   paradedb/paradedb:latest
 ```
 
-This will spin up a Postgres instance with `pg_search` and its dependencies preinstalled.
+This will spin up a Postgres instance with `pg_search` preinstalled.
 
-### From Self-Hosted Postgres
+### From Self-Hosted PostgreSQL
 
-If you are self-hosting Postgres and would like to use the extension within your existing
-Postgres, follow these steps:
+If you are self-hosting Postgres and would like to use the extension within your existing Postgres, follow the steps below.
 
-1. Install Rust and cargo-pgrx:
+It's **very important** to make the following change to your `postgresql.conf` configuration file. `pg_search` must be in the list of `shared_preload_libraries` if your Postgres version is less than 17:
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-cargo install cargo-pgrx --version 0.9.8
+```c
+shared_preload_libraries = 'pg_search'
 ```
 
-2. Install `pgvector` and `pg_bm25`:
+This enables the extension to spawn a background worker process that performs writes to the index. If this background process is not started because of an incorrect `postgresql.conf` configuration, your database connection will crash or hang when you attempt to create a `pg_search` index.
+
+#### Debian/Ubuntu
+
+We provide prebuilt binaries for Debian-based Linux for Postgres 14, 15, 16, and 17. You can download the latest version for your architecture from the [releases page](https://github.com/paradedb/paradedb/releases).
+
+Our prebuilt binaries come with the ICU tokenizer enabled, which requires the `libicu` library. If you don't have it installed, you can do so with:
 
 ```bash
-# Clone the repo (optionally pick a specific version)
-git clone https://github.com/paradedb/paradedb.git --tag <VERSION>
+# Ubuntu 20.04 or 22.04
+sudo apt-get install -y libicu70
 
-# Install pgvector and pg_bm25
-cd pg_search/
-cargo pgrx init --pg<YOUR-POSTGRES-MAJOR_VERSION>=`which pg_config`
-./configure.sh
+# Ubuntu 24.04
+sudo apt-get install -y libicu74
 ```
 
-3. Then, run:
+Or, you can compile the extension from source without `--features icu` to build without the ICU tokenizer.
 
-```bash
-# Install pg_search
-cargo pgrx install
-```
+ParadeDB collects anonymous telemetry to help us understand how many people are using the project. You can opt out of telemetry by setting `export PARADEDB_TELEMETRY=false` (or unsetting the variable) in your shell or in your `~/.bashrc` file before running the extension.
+
+#### macOS
+
+We don't suggest running production workloads on macOS. As a result, we don't provide prebuilt binaries for macOS. If you are running Postgres on macOS and want to install `pg_search`, please follow the [development](#development) instructions, but do `cargo pgrx install --release` instead of `cargo pgrx run`. This will build the extension from source and install it in your Postgres instance.
 
 You can then create the extension in your database by running:
 
 ```sql
-CREATE EXTENSION pg_search CASCADE;
+CREATE EXTENSION pg_search;
 ```
 
-If you are using a managed Postgres service like Amazon RDS, you will not be able to install `pg_search` until the Postgres service explicitly supports it and its dependencies.
+Note: If you are using a managed Postgres service like Amazon RDS, you will not be able to install `pg_search` until the Postgres service explicitly supports it.
 
-## Usage
+#### Windows
 
-### Indexing
-
-By default, the `pg_search` extension creates a table called `paradedb.mock_items`
-that you can use for quick experimentation.
-
-To perform a hybrid search, you'll first need to create a BM25 and a HNSW index on
-your table. To index a table, use the following SQL command:
-
-```sql
-CREATE TABLE mock_items AS SELECT * FROM paradedb.mock_items;
-
--- BM25 index
-CREATE INDEX idx_mock_items
-ON mock_items
-USING bm25 ((mock_items.*))
-WITH (text_fields='{"description": {}, "category": {}}');
-
--- HNSW index
-CREATE INDEX ON mock_items USING hnsw (embedding vector_l2_ops);
-```
-
-Once the indexing is complete, you can run various search functions on it.
-
-### Basic Search
-
-Execute a search query on your indexed table:
-
-```sql
-SELECT
-    description,
-    category,
-    rating,
-    paradedb.weighted_mean(
-        paradedb.minmax_bm25(ctid, 'idx_mock_items', 'keyboard'),
-        1 - paradedb.minmax_norm(
-          '[1,2,3]' <-> embedding,
-          MIN('[1,2,3]' <-> embedding) OVER (),
-          MAX('[1,2,3]' <-> embedding) OVER ()
-        ),
-        ARRAY[0.8,0.2]
-    ) as score_hybrid
-FROM mock_items
-ORDER BY score_hybrid DESC;
-```
-
-Please refer to the [documentation](https://docs.paradedb.com/search/hybrid) for a more thorough overview of `pg_search`'s query support.
+Windows is not supported. This restriction is [inherited from pgrx not supporting Windows](https://github.com/pgcentralfoundation/pgrx?tab=readme-ov-file#caveats--known-issues).
 
 ## Development
 
 ### Prerequisites
 
-Before developing the extension, ensure that you have Rust installed
-(version >1.70), ideally via `rustup` (we've observed issues with installing Rust
-via Homebrew on macOS).
-
-Then, install and initialize pgrx:
+To develop the extension, first install stable Rust using `rustup`:
 
 ```bash
-cargo install cargo-pgrx --version 0.9.8
-cargo pgrx init
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup install stable
 ```
+
+Note: While it is possible to install Rust via your package manager, we recommend using `rustup` as we've observed inconsistencies with Homebrew's Rust installation on macOS.
+
+Then, install the PostgreSQL version of your choice using your system package manager. Here we provide the commands for the default PostgreSQL version used by this project:
+
+```bash
+# macOS
+brew install postgresql@17
+
+# Ubuntu
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+sudo apt-get update && sudo apt-get install -y postgresql-17 postgresql-server-dev-17
+
+# Arch Linux
+sudo pacman -S extra/postgresql
+```
+
+If you are using Postgres.app to manage your macOS PostgreSQL, you'll need to add the `pg_config` binary to your path before continuing:
+
+```bash
+export PATH="$PATH:/Applications/Postgres.app/Contents/Versions/latest/bin"
+```
+
+Then, install and initialize `pgrx`:
+
+```bash
+# Note: Replace --pg17 with your version of Postgres, if different (i.e. --pg16, etc.)
+cargo install --locked cargo-pgrx --version 0.12.7
+
+# macOS arm64
+cargo pgrx init --pg17=/opt/homebrew/opt/postgresql@17/bin/pg_config
+
+# macOS amd64
+cargo pgrx init --pg17=/usr/local/opt/postgresql@17/bin/pg_config
+
+# Ubuntu
+cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config
+
+# Arch Linux
+cargo pgrx init --pg17=/usr/bin/pg_config
+```
+
+If you prefer to use a different version of Postgres, update the `--pg` flag accordingly.
+
+Note: While it is possible to develop using pgrx's own Postgres installation(s), via `cargo pgrx init` without specifying a `pg_config` path, we recommend using your system package manager's Postgres as we've observed inconsistent behaviours when using pgrx's.
+
+`pgrx` requires `libclang`, which does not come by default on Linux. To install it:
+
+```bash
+# Ubuntu
+sudo apt install libclang-dev
+
+# Arch Linux
+sudo pacman -S extra/clang
+```
+
+#### pgvector
+
+`pgvector` needed for hybrid search unit tests.
+
+```bash
+# Note: Replace 17 with your version of Postgres
+git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git
+cd pgvector/
+
+# macOS arm64
+PG_CONFIG=/opt/homebrew/opt/postgresql@17/bin/pg_config make
+sudo PG_CONFIG=/opt/homebrew/opt/postgresql@17/bin/pg_config make install # may need sudo
+
+# macOS amd64
+PG_CONFIG=/usr/local/opt/postgresql@17/bin/pg_config make
+sudo PG_CONFIG=/usr/local/opt/postgresql@17/bin/pg_config make install # may need sudo
+
+# Ubuntu
+PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config make
+sudo PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config make install # may need sudo
+
+# Arch Linux
+PG_CONFIG=/usr/bin/pg_config make
+sudo PG_CONFIG=/usr/bin/pg_config make install # may need sudo
+```
+
+#### ICU Tokenizer
+
+`pg_search` comes with multiple tokenizers for different languages. The ICU tokenizer, which enables tokenization for Arabic, Amharic, Czech and Greek, is not enabled by default in development due to the additional dependencies it requires. To develop with the ICU tokenizer enabled, first:
+
+Ensure that the `libicu` library is installed. It should come preinstalled on most distros, but you can install it with your system package manager if it isn't:
+
+```bash
+# macOS
+brew install icu4c
+
+# Ubuntu 20.04 or 22.04
+sudo apt-get install -y libicu70
+
+# Ubuntu 24.04
+sudo apt-get install -y libicu74
+
+# Arch Linux
+sudo pacman -S core/icu
+```
+
+Additionally, on macOS you'll need to add the `icu-config` binary to your path before continuing:
+
+```bash
+# ARM macOS
+export PKG_CONFIG_PATH="/opt/homebrew/opt/icu4c/lib/pkgconfig"
+
+# Intel macOS
+export PKG_CONFIG_PATH="/usr/local/opt/icu4c/lib/pkgconfig"
+```
+
+Finally, to enable the ICU tokenizer in development, pass `--features icu` to the `cargo pgrx run` and `cargo pgrx test` commands.
 
 ### Running the Extension
 
-`pg_search` is built on top of two extensions: `pg_bm25` and `pgvector`. To install
-these two extensions, run the configure script. This must be done _after_ initializing
-pgrx:
-
-```bash
-./configure.sh
-```
-
-Note that you need to run this script every time you'd like to update these dependencies.
-
-Then, start pgrx:
+First, start pgrx:
 
 ```bash
 cargo pgrx run
 ```
 
-This will launch an interactive connection to Postgres. Inside Postgres, create
-the extension by running:
+This will launch an interactive connection to Postgres. Inside Postgres, create the extension by running:
 
 ```sql
-CREATE EXTENSION pg_search CASCADE;
+CREATE EXTENSION pg_search;
 ```
 
 Now, you have access to all the extension functions.
@@ -173,33 +236,24 @@ cargo pgrx run
 2. Recreate the extension to load the latest changes:
 
 ```sql
-DROP EXTENSION pg_search CASCADE;
-CREATE EXTENSION pg_search CASCADE;
+DROP EXTENSION pg_search;
+CREATE EXTENSION pg_search;
 ```
 
-## Testing
+### Testing
 
-To run the unit test suite, use the following command:
+We use `cargo test` as our runner for `pg_search` tests.
 
-```bash
-cargo pgrx test
+The tests require a `DATABASE_URL` envirobnment variable to be set. The easiest way to do this is to create a `.env` file with the following contents.
+
+```env
+DATABASE_URL=postgres://USER_NAME@localhost:PORT/pg_search
 ```
 
-This will run all unit tests defined in `/src`. To add a new unit test, simply add
-tests inline in the relevant files, using the `#[cfg(test)]` attribute.
+USER_NAME should be replaced with your system user name. (eg: output of `whoami`)
 
-To run the integration test suite, simply run:
-
-```bash
-./test/runtests.sh
-```
-
-This will create a temporary database, initialize it with the SQL commands defined
-in `fixtures.sql`, and run the tests in `/test/sql` against it. To add a new test,
-simply add a new `.sql` file to `/test/sql` and a corresponding `.out` file to
-`/test/expected` for the expected output, and it will automatically get picked up
-by the test suite.
+PORT should be replaced with 28800 + your postgres version. (eg: 28817 for Postgres 17)
 
 ## License
 
-The `pg_search` is licensed under the [GNU Affero General Public License v3.0](../LICENSE).
+`pg_search` is licensed under the [GNU Affero General Public License v3.0](../LICENSE) and as commercial software. For commercial licensing, please contact us at [sales@paradedb.com](mailto:sales@paradedb.com).

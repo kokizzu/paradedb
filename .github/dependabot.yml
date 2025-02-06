@@ -13,38 +13,62 @@ updates:
         patterns:
           - "*"
 
-  - package-ecosystem: "docker"
-    directory: "/docker"
-    schedule:
-      interval: "monthly"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-patch"]
-    groups:
-      docker-dependencies:
-        patterns:
-          - "*"
+  # - package-ecosystem: "cargo"
+  #   directory: "/cargo-paradedb"
+  #   schedule:
+  #     interval: "monthly"
+  #   ignore:
+  #     - dependency-name: "*"
+  #       update-types: ["version-update:semver-patch"]
+  #   groups:
+  #     cargo-paradedb-dependencies:
+  #       patterns:
+  #         - "*"
 
-  - package-ecosystem: "cargo"
-    directory: "/pg_bm25"
-    schedule:
-      interval: "monthly"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-patch"]
-    groups:
-      rust-dependencies:
-        patterns:
-          - "*"
+  # - package-ecosystem: "docker"
+  #   directory: "/docker"
+  #   schedule:
+  #     interval: "monthly"
+  #   ignore:
+  #     - dependency-name: "*"
+  #       update-types: ["version-update:semver-patch"]
+  #   groups:
+  #     docker-dependencies:
+  #       patterns:
+  #         - "*"
 
-  - package-ecosystem: "cargo"
-    directory: "/pg_search"
-    schedule:
-      interval: "monthly"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-patch"]
-    groups:
-      rust-dependencies:
-        patterns:
-          - "*"
+  # - package-ecosystem: "cargo"
+  #   directory: "/pg_search"
+  #   schedule:
+  #     interval: "monthly"
+  #   ignore:
+  #     - dependency-name: "*"
+  #       update-types: ["version-update:semver-patch"]
+  #   groups:
+  #     pg_search-dependencies:
+  #       patterns:
+  #         - "*"
+
+  # - package-ecosystem: "cargo"
+  #   directory: "/shared"
+  #   schedule:
+  #     interval: "monthly"
+  #   ignore:
+  #     - dependency-name: "*"
+  #       update-types: ["version-update:semver-patch"]
+  #   groups:
+  #     shared-dependencies:
+  #       patterns:
+  #         - "*"
+
+  # - package-ecosystem: "cargo"
+  #   directory: "/tokenizers"
+  #   schedule:
+  #     interval: "monthly"
+  #   ignore:
+  #     - dependency-name: "*"
+  #       update-types: ["version-update:semver-patch"]
+  #   groups:
+  #     tokenizers-dependencies:
+  #       patterns:
+  #         - "*"

@@ -1,26 +1,19 @@
 #
-# This docker-compose.dev.yml file is for development of the ParadeDB extensions only. It
-# builds the Dockerfile.dev, which currently only builds pg_bm25, pg_search, pgml, and pgvector,
-# to allow for rapid testing of changes to these extensions. It is not intended for production use.
+# This docker-compose.dev.yml file is for development deployments of ParadeDB only. It directly builds our
+# Dockerfile, which packages all ParadeDB extensions. It is not intended for production use. For hobby production
+# usage, please use docker-compose.yml. For professional production usage, we recommend using our Helm chart.
 #
 
-version: "3.8"
-
 services:
-  paradedb:
+  paradedb-dev:
     build:
       context: ..
-      dockerfile: ./docker/Dockerfile.dev
-      args:
-        PG_VERSION_MAJOR: 15
-        PG_BM25_VERSION: 0.0.0
-        PG_SEARCH_VERSION: 0.0.0
-        PGML_VERSION: 2.7.8
-        PGVECTOR_VERSION: 0.5.0
+      dockerfile: ./docker/Dockerfile
       cache_from:
         - type=local,src=./.docker_cache_dev
       cache_to:
         - type=local,dest=./.docker_cache_dev
+    container_name: paradedb-dev
     environment:
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
